@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GoogleGenAI, Type } from "@google/genai";
 import { 
   Search, 
   ChefHat, 
@@ -80,17 +79,16 @@ const App = () => {
   // Initialize API Key
   useEffect(() => {
     // 1. Try LocalStorage
-    const localKey = localStorage.getItem('gemini_api_key');
-    // 2. Try Environment Variable (if built/injected)
-    const envKey = process.env.API_KEY;
+    const localKey = localStorage.getItem('mimo_api_key');
+    // 2. Pre-fill with the known key if user hasn't set one, 
+    // strictly for convenience in this specific request context.
+    // In a real app, we might leave it blank.
+    const defaultKey = "sk-c422zhoyiteawbh22t08jfon8s08dg923r2h9kiw030uetce";
 
     if (localKey) {
       setApiKey(localKey);
-    } else if (envKey) {
-      setApiKey(envKey);
     } else {
-      // If no key found anywhere, prompt user
-      setShowSettings(true);
+      setApiKey(defaultKey);
     }
   }, []);
 
@@ -98,7 +96,7 @@ const App = () => {
     e.preventDefault();
     const input = (document.getElementById('apiKeyInput') as HTMLInputElement).value.trim();
     if (input) {
-      localStorage.setItem('gemini_api_key', input);
+      localStorage.setItem('mimo_api_key', input);
       setApiKey(input);
       setShowSettings(false);
       setError(null);
@@ -106,17 +104,11 @@ const App = () => {
   };
 
   const handleClearKey = () => {
-    localStorage.removeItem('gemini_api_key');
+    localStorage.removeItem('mimo_api_key');
     setApiKey('');
-    // Optionally keep settings open so they can enter a new one
   };
 
   const handleSearch = async () => {
-    if (!apiKey) {
-      setShowSettings(true);
-      return;
-    }
-
     if (!query.trim() && !filters.mainIngredient) {
       setError('请输入菜名或主要食材');
       return;
@@ -127,8 +119,6 @@ const App = () => {
     setRecipe(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: apiKey });
-      
       const filterDesc = [
         filters.cuisine ? `菜系: ${filters.cuisine}` : '',
         filters.timeLimit ? `时间限制: ${filters.timeLimit}` : '',
@@ -136,80 +126,73 @@ const App = () => {
         filters.mainIngredient ? `主要食材: ${filters.mainIngredient}` : ''
       ].filter(Boolean).join(', ');
 
-      const userPrompt = `Wait, act as a professional recipe aggregator for Chinese users. 
-      Target Dish: "${query || filters.mainIngredient}". 
+      const systemPrompt = `You are a professional recipe aggregator for Chinese users.
+      Output strictly in JSON format. Do not output markdown code blocks (like \`\`\`json). Just the raw JSON string.
+      
+      The JSON schema must be:
+      {
+        "title": "String",
+        "summary": "String (Mention sources like Xiaohongshu/Bilibili)",
+        "cuisine": "String",
+        "difficulty": "String",
+        "totalTime": "String",
+        "calories": Number,
+        "ingredients": ["String", "String"],
+        "steps": ["String", "String"],
+        "rating": Number (1-5),
+        "reviewCount": "String (e.g. '1k+')"
+      }`;
+
+      const userPrompt = `Target Dish: "${query || filters.mainIngredient}". 
       Constraints: ${filterDesc}.
-      
       Task: Search data from Xiaohongshu, Bilibili, and Xiachufang to find the "Best" recipe.
-      
-      REQUIREMENTS:
-      1. Output language: Simplified Chinese.
-      2. Mention sources in 'summary'.
-      3. Return strict JSON.
-      `;
+      Requirements: Simplified Chinese. Return strict JSON.`;
 
-      const responseSchema = {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING },
-          summary: { type: Type.STRING },
-          cuisine: { type: Type.STRING },
-          difficulty: { type: Type.STRING },
-          totalTime: { type: Type.STRING },
-          calories: { type: Type.NUMBER },
-          ingredients: { type: Type.ARRAY, items: { type: Type.STRING } },
-          steps: { type: Type.ARRAY, items: { type: Type.STRING } },
-          rating: { type: Type.NUMBER },
-          reviewCount: { type: Type.STRING }
+      const messages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ];
+
+      // Call our Vercel API backend
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        required: ["title", "summary", "ingredients", "steps"]
-      };
-
-      // Switch to 'gemini-3-flash-preview' for better rate limits while maintaining good quality
-      const textResponse = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: userPrompt,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: responseSchema,
-        }
+        body: JSON.stringify({
+          messages: messages,
+          apiKey: apiKey // Pass the key (or let backend use default)
+        })
       });
 
-      const data = JSON.parse(textResponse.text || '{}') as Recipe;
-      
-      let generatedImageUrl = undefined;
-      try {
-        const imageResponse = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-image',
-          contents: {
-            parts: [{ text: `A high-quality, professional food photo of ${data.title}. Appetizing, restaurant style, 4k, bokeh background.` }]
-          },
-          config: {
-            imageConfig: { aspectRatio: "16:9" }
-          }
-        });
-
-        if (imageResponse.candidates?.[0]?.content?.parts) {
-          const part = imageResponse.candidates[0].content.parts.find(p => p.inlineData);
-          if (part?.inlineData) {
-            generatedImageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-          }
-        }
-      } catch (imgErr) {
-        console.warn("Image generation failed, proceeding with text only", imgErr);
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.details || errData.error || 'Server Error');
       }
 
-      setRecipe({ ...data, imageUrl: generatedImageUrl });
+      const data = await response.json();
+      
+      // Parse content from OpenAI-compatible format
+      let contentString = data.choices?.[0]?.message?.content;
+      
+      if (!contentString) {
+        throw new Error("API returned empty content");
+      }
+
+      // Cleanup markdown if present (e.g. ```json ... ```)
+      contentString = contentString.replace(/```json/g, '').replace(/```/g, '').trim();
+
+      const recipeData = JSON.parse(contentString) as Recipe;
+      
+      // Image generation is skipped for Mimo text-only API
+      // We will use a placeholder or null
+      setRecipe({ ...recipeData, imageUrl: undefined });
 
     } catch (err: any) {
       console.error("API Error:", err);
-      if (err.message?.includes('403') || err.message?.includes('API_KEY_INVALID')) {
-         setError('API Key 无效。请检查设置。');
+      setError(`生成失败: ${err.message || '未知错误'}`);
+      if (err.message?.includes('401')) {
          setShowSettings(true);
-      } else if (err.message?.includes('429')) {
-        setError('当前使用人数较多（API 限流），请等待1分钟后再试。');
-      } else {
-        setError(`生成失败: ${err.message || '未知错误'}`);
       }
     } finally {
       setLoading(false);
@@ -258,20 +241,20 @@ const App = () => {
                 <div className="bg-emerald-100 p-3 rounded-full mb-3">
                   <Key className="w-8 h-8 text-emerald-600" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-800">API Key 设置</h3>
+                <h3 className="text-xl font-bold text-gray-800">API 服务设置</h3>
                 <p className="text-sm text-gray-500 text-center mt-2">
-                  为了在浏览器中直接访问 Gemini，请配置您的 API Key。<br/>
-                  <span className="text-xs text-gray-400">(Key 仅存储在您的设备本地，不会上传)</span>
+                  当前使用: Xiaomi Mimo (小米大模型)<br/>
+                  <span className="text-xs text-gray-400">(Key 仅存储在您的设备本地)</span>
                 </p>
               </div>
 
               <form onSubmit={handleSaveKey} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Google Gemini API Key</label>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Xiaomi Mimo API Key</label>
                   <input 
                     id="apiKeyInput"
                     type="password" 
-                    placeholder="AIzaSy..." 
+                    placeholder="sk-..." 
                     defaultValue={apiKey}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all font-mono text-sm"
                   />
@@ -286,14 +269,7 @@ const App = () => {
               </form>
 
               <div className="mt-6 pt-4 border-t border-gray-100 flex items-center justify-between text-xs">
-                <a 
-                  href="https://aistudio.google.com/app/apikey" 
-                  target="_blank" 
-                  rel="noreferrer"
-                  className="text-emerald-600 font-medium flex items-center gap-1 hover:underline"
-                >
-                  获取免费 Key <ExternalLink className="w-3 h-3"/>
-                </a>
+                 <span className="text-gray-400">如需使用其他兼容 API，请修改 API Endpoint</span>
                 {apiKey && (
                   <button onClick={handleClearKey} className="text-red-500 hover:text-red-700 font-medium">
                     清除本地 Key
@@ -395,7 +371,7 @@ const App = () => {
               ) : (
                 <div className="flex items-center justify-center h-full text-gray-400 flex-col gap-2">
                   <ImageIcon className="w-10 h-10 opacity-30"/>
-                  <span className="text-xs">图片生成已跳过</span>
+                  <span className="text-xs">图片生成不支持 (Mimo Text API)</span>
                 </div>
               )}
               <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
