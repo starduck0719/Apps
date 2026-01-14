@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
@@ -10,7 +10,11 @@ import {
   Star,
   Filter,
   Image as ImageIcon,
-  AlertCircle
+  AlertCircle,
+  Settings,
+  Key,
+  X,
+  ExternalLink
 } from 'lucide-react';
 
 // --- Types ---
@@ -68,8 +72,51 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // API Key State
+  const [apiKey, setApiKey] = useState<string>('');
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Initialize API Key
+  useEffect(() => {
+    // 1. Try LocalStorage
+    const localKey = localStorage.getItem('gemini_api_key');
+    // 2. Try Environment Variable (if built/injected)
+    const envKey = process.env.API_KEY;
+
+    if (localKey) {
+      setApiKey(localKey);
+    } else if (envKey) {
+      setApiKey(envKey);
+    } else {
+      // If no key found anywhere, prompt user
+      setShowSettings(true);
+    }
+  }, []);
+
+  const handleSaveKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    const input = (document.getElementById('apiKeyInput') as HTMLInputElement).value.trim();
+    if (input) {
+      localStorage.setItem('gemini_api_key', input);
+      setApiKey(input);
+      setShowSettings(false);
+      setError(null);
+    }
+  };
+
+  const handleClearKey = () => {
+    localStorage.removeItem('gemini_api_key');
+    setApiKey('');
+    // Optionally keep settings open so they can enter a new one
+  };
 
   const handleSearch = async () => {
+    if (!apiKey) {
+      setShowSettings(true);
+      return;
+    }
+
     if (!query.trim() && !filters.mainIngredient) {
       setError('请输入菜名或主要食材');
       return;
@@ -80,7 +127,7 @@ const App = () => {
     setRecipe(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: apiKey });
       
       const filterDesc = [
         filters.cuisine ? `菜系: ${filters.cuisine}` : '',
@@ -155,7 +202,10 @@ const App = () => {
 
     } catch (err: any) {
       console.error("API Error:", err);
-      if (err.message?.includes('429')) {
+      if (err.message?.includes('403') || err.message?.includes('API_KEY_INVALID')) {
+         setError('API Key 无效。请检查设置。');
+         setShowSettings(true);
+      } else if (err.message?.includes('429')) {
         setError('请求太频繁了，请稍后再试。');
       } else {
         setError(`生成失败: ${err.message || '未知错误'}`);
@@ -181,11 +231,78 @@ const App = () => {
             <ChefHat className="w-8 h-8" />
             <h1 className="text-xl font-bold tracking-wide">智厨搜珍</h1>
           </div>
+          <button 
+            onClick={() => setShowSettings(true)}
+            className="p-2 bg-emerald-700 rounded-full hover:bg-emerald-800 transition-colors"
+          >
+            <Settings className="w-5 h-5 text-emerald-100" />
+          </button>
         </div>
       </header>
 
       <main className="w-full max-w-3xl p-4 space-y-6">
         
+        {/* Settings Modal */}
+        {showSettings && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 relative animate-scaleIn">
+              <button 
+                onClick={() => setShowSettings(false)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+              
+              <div className="flex flex-col items-center mb-6">
+                <div className="bg-emerald-100 p-3 rounded-full mb-3">
+                  <Key className="w-8 h-8 text-emerald-600" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-800">API Key 设置</h3>
+                <p className="text-sm text-gray-500 text-center mt-2">
+                  为了在浏览器中直接访问 Gemini，请配置您的 API Key。<br/>
+                  <span className="text-xs text-gray-400">(Key 仅存储在您的设备本地，不会上传)</span>
+                </p>
+              </div>
+
+              <form onSubmit={handleSaveKey} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Google Gemini API Key</label>
+                  <input 
+                    id="apiKeyInput"
+                    type="password" 
+                    placeholder="AIzaSy..." 
+                    defaultValue={apiKey}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all font-mono text-sm"
+                  />
+                </div>
+                
+                <button 
+                  type="submit"
+                  className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl hover:bg-emerald-700 active:scale-95 transition-all shadow-lg shadow-emerald-200"
+                >
+                  保存配置
+                </button>
+              </form>
+
+              <div className="mt-6 pt-4 border-t border-gray-100 flex items-center justify-between text-xs">
+                <a 
+                  href="https://aistudio.google.com/app/apikey" 
+                  target="_blank" 
+                  rel="noreferrer"
+                  className="text-emerald-600 font-medium flex items-center gap-1 hover:underline"
+                >
+                  获取免费 Key <ExternalLink className="w-3 h-3"/>
+                </a>
+                {apiKey && (
+                  <button onClick={handleClearKey} className="text-red-500 hover:text-red-700 font-medium">
+                    清除本地 Key
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Search & Filter Section */}
         <div className="bg-white rounded-2xl shadow-sm p-4 space-y-4">
           <div className="relative">
@@ -256,6 +373,14 @@ const App = () => {
             <div className="text-sm">
               <p className="font-bold">生成遇到问题</p>
               <p className="opacity-80">{error}</p>
+              {error.includes('Key') && (
+                <button 
+                  onClick={() => setShowSettings(true)}
+                  className="mt-2 text-xs bg-red-100 text-red-700 px-3 py-1 rounded-full font-bold hover:bg-red-200"
+                >
+                  点击检查 Key 设置
+                </button>
+              )}
             </div>
           </div>
         )}
