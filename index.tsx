@@ -1,13 +1,10 @@
-
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-// Fix: Use correct imports from @google/genai and avoid deprecated Schema/SchemaType
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
   Search, 
   ChefHat, 
   Clock, 
-  Flame, 
   Utensils, 
   Check, 
   Star,
@@ -39,10 +36,15 @@ interface FilterState {
   mainIngredient: string;
 }
 
+interface FilterChipProps {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}
+
 // --- Components ---
 
-// Fix: Added React.Key to props if needed, though standard practice is just defining the functional props
-const FilterChip = ({ label, active, onClick }: { label: string, active: boolean, onClick: () => void }) => (
+const FilterChip: React.FC<FilterChipProps> = ({ label, active, onClick }) => (
   <button
     onClick={onClick}
     className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 border
@@ -78,7 +80,6 @@ const App = () => {
     setRecipe(null);
 
     try {
-      // Fix: Correct initialization using named parameter
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
       const filterDesc = [
@@ -88,7 +89,6 @@ const App = () => {
         filters.mainIngredient ? `主要食材: ${filters.mainIngredient}` : ''
       ].filter(Boolean).join(', ');
 
-      // 1. Generate Recipe Text
       const userPrompt = `Wait, act as a professional recipe aggregator for Chinese users. 
       Target Dish: "${query || filters.mainIngredient}". 
       Constraints: ${filterDesc}.
@@ -101,7 +101,6 @@ const App = () => {
       3. Return strict JSON.
       `;
 
-      // Fix: Use correct Schema object structure for @google/genai
       const responseSchema = {
         type: Type.OBJECT,
         properties: {
@@ -119,7 +118,6 @@ const App = () => {
         required: ["title", "summary", "ingredients", "steps"]
       };
 
-      // Fix: Use gemini-3-pro-preview for complex reasoning tasks
       const textResponse = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: userPrompt,
@@ -129,10 +127,8 @@ const App = () => {
         }
       });
 
-      // Fix: Access response.text directly (property, not a method)
       const data = JSON.parse(textResponse.text || '{}') as Recipe;
       
-      // 2. Generate Image (Sequential to avoid API overhead/quota issues)
       let generatedImageUrl = undefined;
       try {
         const imageResponse = await ai.models.generateContent({
@@ -145,7 +141,6 @@ const App = () => {
           }
         });
 
-        // Fix: Iterate through parts to find the image part correctly
         if (imageResponse.candidates?.[0]?.content?.parts) {
           const part = imageResponse.candidates[0].content.parts.find(p => p.inlineData);
           if (part?.inlineData) {
@@ -160,9 +155,7 @@ const App = () => {
 
     } catch (err: any) {
       console.error("API Error:", err);
-      if (err.message?.includes('403') || err.message?.includes('API_KEY_INVALID')) {
-        setError('API Key 无效或未启用相关权限，请检查配置。');
-      } else if (err.message?.includes('429')) {
+      if (err.message?.includes('429')) {
         setError('请求太频繁了，请稍后再试。');
       } else {
         setError(`生成失败: ${err.message || '未知错误'}`);
@@ -187,9 +180,6 @@ const App = () => {
           <div className="flex items-center gap-2">
             <ChefHat className="w-8 h-8" />
             <h1 className="text-xl font-bold tracking-wide">智厨搜珍</h1>
-          </div>
-          <div className="text-emerald-100 text-xs font-medium bg-emerald-700 px-2 py-1 rounded">
-            PWA APP
           </div>
         </div>
       </header>
