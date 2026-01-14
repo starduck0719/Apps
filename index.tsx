@@ -165,8 +165,9 @@ const App = () => {
         required: ["title", "summary", "ingredients", "steps"]
       };
 
+      // Switch to 'gemini-3-flash-preview' for better rate limits while maintaining good quality
       const textResponse = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-3-flash-preview',
         contents: userPrompt,
         config: {
           responseMimeType: 'application/json',
@@ -206,7 +207,7 @@ const App = () => {
          setError('API Key 无效。请检查设置。');
          setShowSettings(true);
       } else if (err.message?.includes('429')) {
-        setError('请求太频繁了，请稍后再试。');
+        setError('当前使用人数较多（API 限流），请等待1分钟后再试。');
       } else {
         setError(`生成失败: ${err.message || '未知错误'}`);
       }
