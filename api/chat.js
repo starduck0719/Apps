@@ -11,12 +11,14 @@ export default async function handler(req) {
   }
 
   try {
-    const { messages, apiKey } = await req.json();
+    const { messages, apiKey, model } = await req.json();
 
     // Use provided key from frontend, or fallback to the one configured in code
-    // In production, it's better to use process.env.MIMO_API_KEY
     const API_KEY = apiKey || "sk-c422zhoyiteawbh22t08jfon8s08dg923r2h9kiw030uetce";
     const API_URL = "https://api.xiaomimimo.com/v1/chat/completions";
+    
+    // Prefer model from client to allow easy updates, fallback to mimo-v2-flash
+    const targetModel = model || "mimo-v2-flash";
 
     const response = await fetch(API_URL, {
       method: "POST",
@@ -25,12 +27,12 @@ export default async function handler(req) {
         "Authorization": `Bearer ${API_KEY}`
       },
       body: JSON.stringify({
-        model: "mimilm", // Assuming generic model alias, change if specific version required
+        model: targetModel,
         messages: messages,
         temperature: 0.7,
         max_tokens: 2048,
         stream: false,
-        response_format: { type: "json_object" } // Try to enforce JSON if supported, otherwise system prompt handles it
+        response_format: { type: "json_object" } 
       })
     });
 

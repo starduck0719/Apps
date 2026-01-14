@@ -45,6 +45,9 @@ interface FilterChipProps {
   onClick: () => void;
 }
 
+// --- Constants ---
+const MODEL_ID = "mimo-v2-flash"; // Defined here for easy updates
+
 // --- Components ---
 
 const FilterChip: React.FC<FilterChipProps> = ({ label, active, onClick }) => (
@@ -82,7 +85,6 @@ const App = () => {
     const localKey = localStorage.getItem('mimo_api_key');
     // 2. Pre-fill with the known key if user hasn't set one, 
     // strictly for convenience in this specific request context.
-    // In a real app, we might leave it blank.
     const defaultKey = "sk-c422zhoyiteawbh22t08jfon8s08dg923r2h9kiw030uetce";
 
     if (localKey) {
@@ -161,7 +163,8 @@ const App = () => {
         },
         body: JSON.stringify({
           messages: messages,
-          apiKey: apiKey // Pass the key (or let backend use default)
+          apiKey: apiKey, // Pass the key (or let backend use default)
+          model: MODEL_ID // Explicitly pass the model name from frontend
         })
       });
 
@@ -243,7 +246,7 @@ const App = () => {
                 </div>
                 <h3 className="text-xl font-bold text-gray-800">API 服务设置</h3>
                 <p className="text-sm text-gray-500 text-center mt-2">
-                  当前使用: Xiaomi Mimo (小米大模型)<br/>
+                  当前模型: <span className="font-mono bg-gray-100 px-1 rounded">{MODEL_ID}</span><br/>
                   <span className="text-xs text-gray-400">(Key 仅存储在您的设备本地)</span>
                 </p>
               </div>
